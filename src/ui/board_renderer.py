@@ -10,6 +10,21 @@ class BoardRenderer:
 
         self.light_color = (240, 217, 181)
         self.dark_color = (181, 136, 99)
+        self.selected_highlight = pygame.Surface(
+            (self.square_size, self.square_size),
+            pygame.SRCALPHA,
+        )
+        self.selected_highlight.fill((255, 215, 0, 110))
+        self.destination_highlight = pygame.Surface(
+            (self.square_size, self.square_size),
+            pygame.SRCALPHA,
+        )
+        self.destination_highlight.fill((50, 180, 70, 100))
+        self.check_highlight = pygame.Surface(
+            (self.square_size, self.square_size),
+            pygame.SRCALPHA,
+        )
+        self.check_highlight.fill((220, 35, 35, 155))
 
         project_root = Path(__file__).resolve().parents[2]
         pieces_dir = project_root / "assets" / "pieces" / "vector-chess-pieces" / "Flat"
@@ -53,7 +68,12 @@ class BoardRenderer:
 
             self.screen.blit(image, (x, y))
 
-    def draw_board(self):
+    def draw_board(
+        self,
+        selected_square: int | None = None,
+        legal_destinations: set[int] | None = None,
+        check_square: int | None = None,
+    ):
         for row in range(8):
             for col in range(8):
                 color = (
@@ -61,14 +81,91 @@ class BoardRenderer:
                     if (row + col) % 2 == 0
                     else self.dark_color
                 )
-                #creating each square of the chess board
+                square_rect = (
+                    col * self.square_size,
+                    row * self.square_size,
+                    self.square_size,
+                    self.square_size,
+                )
                 pygame.draw.rect(
                     self.screen,
                     color,
-                    (
-                        col * self.square_size,
-                        row * self.square_size,
-                        self.square_size,
-                        self.square_size
-                    )
+                    square_rect,
                 )
+                square = chess.square(col, 7 - row)
+                if square == selected_square:
+                    self.screen.blit(self.selected_highlight, square_rect[:2])
+                elif legal_destinations is not None and square in legal_destinations:
+                    self.screen.blit(self.destination_highlight, square_rect[:2])
+                if square == check_square:
+                    self.screen.blit(self.check_highlight, square_rect[:2])
+
+    def draw_game_over(self, status: str) -> pygame.Rect:
+        overlay = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 150))
+        self.screen.blit(overlay, (0, 0))
+
+        width, height = self.screen.get_size()
+        title_font = pygame.font.Font(None, max(28, self.square_size // 2))
+        button_font = pygame.font.Font(None, max(22, self.square_size // 3))
+        title = title_font.render(status, True, (255, 255, 255))
+        title_rect = title.get_rect(center=(width // 2, height // 2 - self.square_size // 3))
+        self.screen.blit(title, title_rect)
+
+        button = self.restart_button_rect()
+        pygame.draw.rect(self.screen, (55, 135, 75), button, border_radius=8)
+        label = button_font.render("Play again", True, (255, 255, 255))
+        self.screen.blit(label, label.get_rect(center=button.center))
+        return button
+
+    def restart_button_rect(self) -> pygame.Rect:
+        width, height = self.screen.get_size()
+        button_width = min(width - 32, self.square_size * 3)
+        button_height = max(36, self.square_size // 2)
+        return pygame.Rect(
+            (width - button_width) // 2,
+            height // 2 + self.square_size // 6,
+            button_width,
+            button_height,
+        )
+
+    def promotion_choice_rects(self) -> dict[int, pygame.Rect]:
+        width, height = self.screen.get_size()
+        button_size = self.square_size
+        panel_padding = max(8, self.square_size // 8)
+        panel_width = button_size * 4 + panel_padding * 2
+        panel_height = button_size + panel_padding * 2
+        panel = pygame.Rect(
+            (width - panel_width) // 2,
+            (height - panel_height) // 2,
+            panel_width,
+            panel_height,
+        )
+
+        piece_types = (chess.QUEEN, chess.ROOK, chess.BISHOP, chess.KNIGHT)
+        return {
+            piece_type: pygame.Rect(
+                panel.x + panel_padding + index * button_size,
+                panel.y + panel_padding,
+                button_size,
+                button_size,
+            )
+            for index, piece_type in enumerate(piece_types)
+        }
+
+    def draw_promotion_choices(self, color: chess.Color) -> dict[int, pygame.Rect]:
+        button_rects = self.promotion_choice_rects()
+        panel_padding = max(8, self.square_size // 8)
+        first_button = button_rects[chess.QUEEN]
+        panel = pygame.Rect(
+            first_button.x - panel_padding,
+            first_button.y - panel_padding,
+            self.square_size * 4 + 2 * panel_padding,
+            self.square_size + 2 * panel_padding,
+        )
+        pygame.draw.rect(self.screen, (35, 35, 35), panel, border_radius=8)
+        for piece_type, rect in button_rects.items():
+            pygame.draw.rect(self.screen, (225, 225, 225), rect)
+            image = self.piece_images[(piece_type, color)]
+            self.screen.blit(image, rect)
+        return button_rects
