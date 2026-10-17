@@ -25,6 +25,11 @@ class BoardRenderer:
             pygame.SRCALPHA,
         )
         self.check_highlight.fill((220, 35, 35, 155))
+        self.last_move_highlight = pygame.Surface(
+            (self.square_size, self.square_size),
+            pygame.SRCALPHA,
+        )
+        self.last_move_highlight.fill((245, 205, 55, 115))
 
         project_root = Path(__file__).resolve().parents[2]
         pieces_dir = project_root / "assets" / "pieces" / "vector-chess-pieces" / "Flat"
@@ -73,6 +78,7 @@ class BoardRenderer:
         selected_square: int | None = None,
         legal_destinations: set[int] | None = None,
         check_square: int | None = None,
+        last_move: chess.Move | None = None,
     ):
         for row in range(8):
             for col in range(8):
@@ -93,6 +99,11 @@ class BoardRenderer:
                     square_rect,
                 )
                 square = chess.square(col, 7 - row)
+                if last_move is not None and square in (
+                    last_move.from_square,
+                    last_move.to_square,
+                ):
+                    self.screen.blit(self.last_move_highlight, square_rect[:2])
                 if square == selected_square:
                     self.screen.blit(self.selected_highlight, square_rect[:2])
                 elif legal_destinations is not None and square in legal_destinations:
@@ -117,6 +128,26 @@ class BoardRenderer:
         label = button_font.render("Play again", True, (255, 255, 255))
         self.screen.blit(label, label.get_rect(center=button.center))
         return button
+
+    def draw_thinking(self) -> None:
+        width, height = self.screen.get_size()
+        font = pygame.font.Font(None, max(24, self.square_size // 3))
+        label = font.render("Stockfish is thinking...", True, (255, 255, 255))
+        padding = max(12, self.square_size // 5)
+        panel = label.get_rect(
+            center=(width // 2, height - padding - label.get_height() // 2)
+        ).inflate(
+            padding * 2, padding * 2
+        )
+        background = pygame.Surface(panel.size, pygame.SRCALPHA)
+        pygame.draw.rect(
+            background,
+            (35, 42, 52, 150),
+            background.get_rect(),
+            border_radius=8,
+        )
+        self.screen.blit(background, panel)
+        self.screen.blit(label, label.get_rect(center=panel.center))
 
     def restart_button_rect(self) -> pygame.Rect:
         width, height = self.screen.get_size()
