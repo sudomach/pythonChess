@@ -5,8 +5,9 @@ import pygame
 
 
 class SoundManager:
-    def __init__(self) -> None:
+    def __init__(self, muted: bool = False) -> None:
         self.sounds: dict[str, pygame.mixer.Sound] = {}
+        self.muted = muted
         if pygame.mixer.get_init() is None:
             try:
                 pygame.mixer.init()
@@ -30,6 +31,9 @@ class SoundManager:
             )
         }
 
+    def toggle_mute(self) -> None:
+        self.muted = not self.muted
+
     def play(self, name: str) -> None:
-        if self.sounds:
+        if self.sounds and not self.muted:
             self.sounds[name].play()

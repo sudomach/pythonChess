@@ -11,7 +11,14 @@ STOCKFISH_PATH = (
 )
 
 class EngineService:
-    def __init__(self, engine_path=STOCKFISH_PATH):
+    skill_levels = {
+        "Easy": 0,
+        "Medium": 8,
+        "Hard": 16,
+        "Expert": 20,
+    }
+
+    def __init__(self, engine_path=STOCKFISH_PATH, difficulty="Medium"):
         if not engine_path.exists():
             raise FileNotFoundError(
                 f"Stockfish executable not found: {engine_path}"
@@ -20,6 +27,7 @@ class EngineService:
         self.engine = chess.engine.SimpleEngine.popen_uci(
             str(engine_path)
         )
+        self.engine.configure({"Skill Level": self.skill_levels[difficulty]})
 
     def get_best_move(self, board, time_limit=1.0):
         """Return Stockfish's best move for the current position."""
