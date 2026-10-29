@@ -1,4 +1,7 @@
 chess
 
-#stockfish chess engine
+# stockfish chess engine
 engines/
+
+# local player data (credentials, settings, and stats)
+data/

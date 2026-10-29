@@ -1,7 +1,9 @@
-from pathlib import Path
 import math
-import pygame
+
 import chess
+import pygame
+
+from src.settings import get_resource_path
 
 
 STATUS_PANEL_HEIGHT = 64
@@ -17,6 +19,37 @@ class BoardRenderer:
     def __init__(self, screen):
         self.screen = screen
         self.status_panel_height = STATUS_PANEL_HEIGHT
+        self._source_piece_images = {}
+        self._load_piece_images()
+        self.resize(screen)
+
+    def _load_piece_images(self) -> None:
+        pieces_dir = get_resource_path(
+            "assets",
+            "pieces",
+            "vector-chess-pieces",
+            "Flat",
+        )
+
+        piece_names = {
+            chess.PAWN: "Pawn",
+            chess.KNIGHT: "Knight",
+            chess.BISHOP: "Bishop",
+            chess.ROOK: "Rook",
+            chess.QUEEN: "Queen",
+            chess.KING: "King",
+        }
+
+        for piece_type, name in piece_names.items():
+            for color in ("white", "black"):
+                key = (piece_type, color == "white")
+                image_path = pieces_dir / f"{name} Flat {color} 288px.png"
+                self._source_piece_images[key] = pygame.image.load(
+                    str(image_path)
+                ).convert_alpha()
+
+    def resize(self, screen) -> None:
+        self.screen = screen
         self.board_area_height = screen.get_height() - self.status_panel_height
         self.right_panel_width = max(220, self.board_area_height // 3)
         self.board_x = max(
@@ -29,6 +62,13 @@ class BoardRenderer:
         ) // 8
         self.board_size = self.square_size * 8
 
+        self.piece_images = {
+            key: pygame.transform.smoothscale(
+                image,
+                (self.square_size, self.square_size),
+            )
+            for key, image in self._source_piece_images.items()
+        }
         self.light_color = (240, 217, 181)
         self.dark_color = (181, 136, 99)
         self.selected_highlight = pygame.Surface(
@@ -51,30 +91,6 @@ class BoardRenderer:
             pygame.SRCALPHA,
         )
         self.last_move_highlight.fill((245, 205, 55, 115))
-
-        project_root = Path(__file__).resolve().parents[2]
-        pieces_dir = project_root / "assets" / "pieces" / "vector-chess-pieces" / "Flat"
-
-        self.piece_images = {}
-
-        piece_names ={
-            chess.PAWN: "Pawn",
-            chess.KNIGHT: "Knight",
-            chess.BISHOP: "Bishop",
-            chess.ROOK: "Rook",
-            chess.QUEEN: "Queen",
-            chess.KING: "King"
-        }
-
-        for piece_type, name in piece_names.items():
-            for color in ["white", "black"]:
-                key =  (piece_type, color == "white")
-
-                image_path = (pieces_dir / f"{name} Flat {color} 288px.png")
-
-                image = pygame.image.load(str(image_path)).convert_alpha()
-
-                self.piece_images[key] = pygame.transform.smoothscale(image, (self.square_size, self.square_size))
 
     def draw_pieces(self, board):
         for square in chess.SQUARES:

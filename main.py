@@ -2,17 +2,22 @@ from concurrent.futures import Future, ThreadPoolExecutor
 
 import pygame
 import chess
+from src.profile_manager import ProfileManager
 from src.ui.board_renderer import (
     BoardRenderer,
     STATUS_PANEL_HEIGHT,
     format_clock,
 )
 from src.services.engine_service import EngineService
+from src.settings import MIN_WINDOW_SIZE
 from src.ui.menu import (
     GameStatistics,
+    DELETE_PROFILE,
     LOCAL_TWO_PLAYER,
     MenuSettings,
     PLAY_AGAINST_COMPUTER,
+    SWITCH_PLAYER,
+    show_auth_screen,
     show_menu,
 )
 from src.ui.sound_manager import SoundManager
@@ -243,7 +248,10 @@ def play_game(
         if game_over and not was_game_over and statistics is not None:
             outcome = board.outcome(claim_draw=True)
             if outcome is not None:
-                statistics.record(outcome)
+                statistics.record(
+                    outcome,
+                    "computer" if engine_service is not None else "local",
+                )
                 game_result_recorded = True
         sounds.play(
             get_move_sound(
@@ -284,13 +292,23 @@ def play_game(
                     )
                     game_over = True
                     if statistics is not None:
-                        statistics.record_winner(winner)
+                        statistics.record_winner(
+                            winner,
+                            "computer" if engine_service is not None else "local",
+                        )
                         game_result_recorded = True
                     update_caption()
 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
+                elif event.type == pygame.VIDEORESIZE:
+                    size = (
+                        max(MIN_WINDOW_SIZE[0], event.w),
+                        max(MIN_WINDOW_SIZE[1], event.h),
+                    )
+                    screen = pygame.display.set_mode(size, pygame.RESIZABLE)
+                    renderer.resize(screen)
                 elif (
                     event.type == pygame.KEYDOWN
                     and event.key == pygame.K_ESCAPE
@@ -461,6 +479,8 @@ def play_game(
 def main() -> None:
     pygame.init()
     engine_service = None
+    profile_manager = ProfileManager()
+    active_username: str | None = None
     settings = MenuSettings()
     statistics = GameStatistics()
     try:
@@ -478,12 +498,42 @@ def main() -> None:
             (
                 left_panel_width + board_size + right_panel_width,
                 board_size + STATUS_PANEL_HEIGHT,
-            )
+            ),
+            pygame.RESIZABLE,
         )
         pygame.display.set_caption("Python Chess")
 
         while True:
-            selected_mode = show_menu(screen, settings, statistics)
+            if active_username is None:
+                auth_result = show_auth_screen(screen, profile_manager)
+                if auth_result is None:
+                    break
+                active_username, settings, statistics = auth_result
+
+            selected_mode = show_menu(
+                screen,
+                settings,
+                statistics,
+                profile_manager,
+                active_username,
+            )
+            profile_manager.save_profile(
+                active_username,
+                settings.to_dict(),
+                statistics.to_dict(),
+            )
+            resized_screen = pygame.display.get_surface()
+            if resized_screen is not None:
+                screen = resized_screen
+            if selected_mode == SWITCH_PLAYER:
+                active_username = None
+                continue
+            if selected_mode == DELETE_PROFILE:
+                profile_manager.delete_account(active_username)
+                active_username = None
+                settings = MenuSettings()
+                statistics = GameStatistics()
+                continue
             if selected_mode is None:
                 break
             if selected_mode == PLAY_AGAINST_COMPUTER:
@@ -495,16 +545,36 @@ def main() -> None:
                     settings,
                     statistics,
                 )
+                profile_manager.save_profile(
+                    active_username,
+                    settings.to_dict(),
+                    statistics.to_dict(),
+                )
+                resized_screen = pygame.display.get_surface()
+                if resized_screen is not None:
+                    screen = resized_screen
             finally:
                 if engine_service is not None:
                     engine_service.close()
                     engine_service = None
             if not return_to_menu:
                 break
+            if active_username is not None:
+                profile_manager.save_profile(
+                    active_username,
+                    settings.to_dict(),
+                    statistics.to_dict(),
+                )
     finally:
         try:
             if engine_service is not None:
                 engine_service.close()
+            if active_username is not None:
+                profile_manager.save_profile(
+                    active_username,
+                    settings.to_dict(),
+                    statistics.to_dict(),
+                )
         finally:
             pygame.quit()
 

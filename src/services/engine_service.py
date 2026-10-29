@@ -1,14 +1,9 @@
 import chess
 import chess.engine
-from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+from src.settings import get_resource_path
 
-STOCKFISH_PATH = (
-    PROJECT_ROOT
-    / "engines"
-    / "stockfish-windows-x86-64-universal.exe"
-)
+STOCKFISH_PATH = get_resource_path("engines", "stockfish-windows-x86-64-universal.exe")
 
 class EngineService:
     skill_levels = {

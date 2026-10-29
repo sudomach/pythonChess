@@ -1,11 +1,17 @@
 from dataclasses import dataclass, field
+from datetime import datetime
 
 import chess
 import pygame
 
+from src.profile_manager import ProfileManager
+from src.settings import MIN_WINDOW_SIZE
+
 
 LOCAL_TWO_PLAYER = "local"
 PLAY_AGAINST_COMPUTER = "computer"
+SWITCH_PLAYER = "switch_player"
+DELETE_PROFILE = "delete_profile"
 
 HELP_SLIDES = (
     (
@@ -73,6 +79,25 @@ class MenuSettings:
     timed_games: bool = True
     time_limit_minutes: int = 5
 
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "sound_enabled": self.sound_enabled,
+            "difficulty": self.difficulty,
+            "timed_games": self.timed_games,
+            "time_limit_minutes": self.time_limit_minutes,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object] | None) -> "MenuSettings":
+        if not data:
+            return cls()
+        return cls(
+            sound_enabled=bool(data.get("sound_enabled", True)),
+            difficulty=str(data.get("difficulty", "Medium")),
+            timed_games=bool(data.get("timed_games", True)),
+            time_limit_minutes=int(data.get("time_limit_minutes", 5)),
+        )
+
 
 @dataclass
 class GameStatistics:
@@ -82,21 +107,68 @@ class GameStatistics:
     draws: int = 0
     estimated_elo: float = 1200
     _white_scores: list[float] = field(default_factory=list, repr=False)
+    history: list[dict[str, str]] = field(default_factory=list)
 
-    def record(self, outcome: chess.Outcome) -> None:
-        self.record_winner(outcome.winner)
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "games_played": self.games_played,
+            "white_wins": self.white_wins,
+            "black_wins": self.black_wins,
+            "draws": self.draws,
+            "estimated_elo": self.estimated_elo,
+            "_white_scores": list(self._white_scores),
+            "history": [dict(entry) for entry in self.history],
+        }
 
-    def record_winner(self, winner: chess.Color | None) -> None:
+    @classmethod
+    def from_dict(cls, data: dict[str, object] | None) -> "GameStatistics":
+        if not data:
+            return cls()
+        stats = cls(
+            games_played=int(data.get("games_played", 0)),
+            white_wins=int(data.get("white_wins", 0)),
+            black_wins=int(data.get("black_wins", 0)),
+            draws=int(data.get("draws", 0)),
+            estimated_elo=float(data.get("estimated_elo", 1200)),
+            _white_scores=[float(score) for score in data.get("_white_scores", [])],
+            history=[
+                {
+                    "date": str(entry["date"]),
+                    "result": str(entry["result"]),
+                    "mode": str(entry["mode"]),
+                }
+                for entry in data.get("history", [])
+                if isinstance(entry, dict)
+                and all(key in entry for key in ("date", "result", "mode"))
+            ],
+        )
+        stats._update_estimated_elo()
+        return stats
+
+    def record(self, outcome: chess.Outcome, mode: str = "local") -> None:
+        self.record_winner(outcome.winner, mode)
+
+    def record_winner(self, winner: chess.Color | None, mode: str = "local") -> None:
         self.games_played += 1
         if winner is None:
             self.draws += 1
             self._white_scores.append(0.5)
+            result = "Draw"
         elif winner == chess.WHITE:
             self.white_wins += 1
             self._white_scores.append(1.0)
+            result = "White win"
         else:
             self.black_wins += 1
             self._white_scores.append(0.0)
+            result = "Black win"
+        self.history.append(
+            {
+                "date": datetime.now().astimezone().isoformat(timespec="minutes"),
+                "result": result,
+                "mode": mode,
+            }
+        )
         self._update_estimated_elo()
 
     def undo_last_result(self) -> None:
@@ -104,6 +176,8 @@ class GameStatistics:
             return
 
         score = self._white_scores.pop()
+        if self.history:
+            self.history.pop()
         self.games_played -= 1
         if score == 1.0:
             self.white_wins -= 1
@@ -483,6 +557,7 @@ def _draw_help_slide(
 def draw_menu(
     screen: pygame.Surface,
     message: str | None = None,
+    username: str | None = None,
 ) -> dict[str, pygame.Rect]:
     width, height = screen.get_size()
     screen.fill((35, 42, 52))
@@ -490,22 +565,26 @@ def draw_menu(
     title_font = pygame.font.Font(None, max(36, min(58, width // 8)))
     message_font = pygame.font.Font(None, max(18, min(26, width // 22)))
 
-    title = title_font.render("Python Chess", True, (245, 245, 245))
-    screen.blit(title, title.get_rect(center=(width // 2, height // 5)))
+    title_text = f"Python Chess - {username}" if username else "Python Chess"
+    title = title_font.render(title_text, True, (245, 245, 245))
+    screen.blit(title, title.get_rect(center=(width // 2, height // 8)))
 
     labels = (
         ("local", "Local Two Player Mode", (55, 135, 75)),
         ("computer", "Play Against Computer", (73, 99, 132)),
         ("settings", "Settings", (73, 99, 132)),
         ("stats", "Stats", (73, 99, 132)),
+        ("history", "Match History", (73, 99, 132)),
+        ("leaderboard", "Local Leaderboard", (73, 99, 132)),
         ("help", "Help", (73, 99, 132)),
+        ("account", "Player Account", (73, 99, 132)),
         ("quit", "Quit", (145, 75, 65)),
     )
     button_width = min(width - 32, max(240, int(min(width, height) * 0.68)))
-    button_height = max(40, min(52, height // 12))
-    gap = max(7, height // 90)
+    button_height = max(34, min(48, height // 14))
+    gap = max(4, height // 120)
     total_height = len(labels) * button_height + (len(labels) - 1) * gap
-    first_button_y = max(height // 3, (height - total_height) // 2)
+    first_button_y = max(height // 5 + 12, (height - total_height) // 2)
     buttons = {
         key: pygame.Rect(
             (width - button_width) // 2,
@@ -531,10 +610,223 @@ def draw_menu(
     return buttons
 
 
+def _draw_action_page(
+    screen: pygame.Surface,
+    title: str,
+    message: str,
+    actions: tuple[tuple[str, str, tuple[int, int, int]], ...],
+) -> dict[str, pygame.Rect]:
+    width, height = screen.get_size()
+    screen.fill((35, 42, 52))
+    title_font = pygame.font.Font(None, max(36, min(58, width // 8)))
+    message_font = pygame.font.Font(None, max(20, min(30, width // 24)))
+    rendered_title = title_font.render(title, True, (245, 245, 245))
+    screen.blit(rendered_title, rendered_title.get_rect(center=(width // 2, height // 3)))
+    rendered_message = message_font.render(message, True, (225, 230, 235))
+    screen.blit(rendered_message, rendered_message.get_rect(center=(width // 2, height // 2)))
+
+    button_width = min(width - 32, max(220, int(min(width, height) * 0.55)))
+    button_height = max(40, min(52, height // 12))
+    gap = max(10, height // 35)
+    buttons: dict[str, pygame.Rect] = {}
+    for index, (key, label, color) in enumerate(actions):
+        rect = pygame.Rect(
+            (width - button_width) // 2,
+            height // 2 + 48 + index * (button_height + gap),
+            button_width,
+            button_height,
+        )
+        _draw_button(screen, rect, label, color)
+        buttons[key] = rect
+    return buttons
+
+
+def draw_auth_screen(
+    screen: pygame.Surface,
+    username: str,
+    password: str,
+    active_field: str,
+    message: str,
+    is_signup: bool,
+) -> dict[str, pygame.Rect]:
+    width, height = screen.get_size()
+    screen.fill((35, 42, 52))
+
+    title_font = pygame.font.Font(None, max(36, min(64, width // 8)))
+    title = title_font.render("Chess Players", True, (245, 245, 245))
+    screen.blit(title, title.get_rect(center=(width // 2, height // 8)))
+
+    panel_width = min(width - 40, max(360, width // 2))
+    panel_height = max(220, height // 2)
+    panel = pygame.Rect(
+        (width - panel_width) // 2,
+        height // 5,
+        panel_width,
+        panel_height,
+    )
+    pygame.draw.rect(screen, (50, 56, 67), panel, border_radius=10)
+
+    field_width = panel.width - 60
+    field_height = max(42, min(54, height // 16))
+    username_rect = pygame.Rect(panel.x + 30, panel.y + 40, field_width, field_height)
+    password_rect = pygame.Rect(panel.x + 30, panel.y + 110, field_width, field_height)
+
+    active_color = (55, 135, 75)
+    inactive_color = (81, 90, 102)
+    label_font = pygame.font.Font(None, max(18, min(26, width // 30)))
+    for label, rect, value, field_name in (
+        ("Username", username_rect, username, "username"),
+        ("Password", password_rect, password, "password"),
+    ):
+        pygame.draw.rect(
+            screen,
+            active_color if active_field == field_name else inactive_color,
+            rect,
+            border_radius=6,
+        )
+        label_text = label_font.render(label, True, (232, 236, 240))
+        screen.blit(label_text, (rect.x, rect.y - 22))
+        display_value = value if field_name == "username" else "*" * len(value)
+        text_font = pygame.font.Font(None, max(18, min(26, width // 32)))
+        text = text_font.render(display_value or ("Username" if field_name == "username" else "Password"), True, (255, 255, 255))
+        screen.blit(text, (rect.x + 12, rect.y + (rect.height - text.get_height()) // 2))
+
+    action_label = "Create account" if is_signup else "Log in"
+    buttons = {
+        "action": pygame.Rect(
+            panel.x + 30,
+            panel.bottom - 60,
+            (panel.width - 90) // 2,
+            42,
+        ),
+        "toggle": pygame.Rect(
+            panel.x + (panel.width - 90) // 2 + 60,
+            panel.bottom - 60,
+            (panel.width - 90) // 2,
+            42,
+        ),
+        "back": pygame.Rect(
+            (width - 220) // 2,
+            height - 72,
+            220,
+            42,
+        ),
+    }
+
+    _draw_button(screen, buttons["action"], action_label, (55, 135, 75))
+    _draw_button(screen, buttons["toggle"], "Switch" if not is_signup else "Login", (73, 99, 132))
+    _draw_button(screen, buttons["back"], "Back", (145, 75, 65))
+
+    status_font = pygame.font.Font(None, max(18, min(24, width // 34)))
+    status_text = status_font.render(message, True, (245, 205, 120))
+    screen.blit(status_text, status_text.get_rect(center=(width // 2, height - 120)))
+    return {
+        "username": username_rect,
+        "password": password_rect,
+        **buttons,
+    }
+
+
+def show_auth_screen(
+    screen: pygame.Surface,
+    profile_manager: ProfileManager,
+) -> tuple[str, MenuSettings, GameStatistics] | None:
+    username = ""
+    password = ""
+    active_field = "username"
+    message = "Create an account or log in to continue."
+    is_signup = False
+    clock = pygame.time.Clock()
+
+    while True:
+        buttons = draw_auth_screen(screen, username, password, active_field, message, is_signup)
+        pygame.display.flip()
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return None
+            if event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_TAB, pygame.K_RETURN):
+                    active_field = "password" if active_field == "username" else "username"
+                    if event.key == pygame.K_RETURN:
+                        if is_signup:
+                            try:
+                                profile_manager.create_account(username, password)
+                                message = "Account created successfully."
+                                is_signup = False
+                                username = ""
+                                password = ""
+                                active_field = "username"
+                            except ValueError as exc:
+                                message = str(exc)
+                        else:
+                            profile = profile_manager.authenticate(username, password)
+                            if profile is None:
+                                message = "Invalid username or password."
+                            else:
+                                settings = MenuSettings.from_dict(profile.get("settings") or {})
+                                stats = GameStatistics.from_dict(profile.get("stats") or {})
+                                return username, settings, stats
+                    continue
+                if event.key == pygame.K_BACKSPACE:
+                    field_value = username if active_field == "username" else password
+                    if field_value:
+                        if active_field == "username":
+                            username = field_value[:-1]
+                        else:
+                            password = field_value[:-1]
+                    continue
+                if event.unicode and event.unicode.isprintable() and event.unicode not in {"\r", "\n"}:
+                    if active_field == "username":
+                        username += event.unicode
+                    else:
+                        password += event.unicode
+                continue
+
+            if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
+                continue
+
+            if buttons["username"].collidepoint(event.pos):
+                active_field = "username"
+            elif buttons["password"].collidepoint(event.pos):
+                active_field = "password"
+            elif buttons["action"].collidepoint(event.pos):
+                if is_signup:
+                    try:
+                        profile_manager.create_account(username, password)
+                        message = "Account created successfully."
+                        is_signup = False
+                        username = ""
+                        password = ""
+                        active_field = "username"
+                    except ValueError as exc:
+                        message = str(exc)
+                else:
+                    profile = profile_manager.authenticate(username, password)
+                    if profile is None:
+                        message = "Invalid username or password."
+                    else:
+                        settings = MenuSettings.from_dict(profile.get("settings") or {})
+                        stats = GameStatistics.from_dict(profile.get("stats") or {})
+                        return username, settings, stats
+            elif buttons["toggle"].collidepoint(event.pos):
+                is_signup = not is_signup
+                message = "Create a new account." if is_signup else "Log in to continue."
+                username = ""
+                password = ""
+                active_field = "username"
+            elif buttons["back"].collidepoint(event.pos):
+                return None
+
+        clock.tick(60)
+
+
 def show_menu(
     screen: pygame.Surface,
     settings: MenuSettings | None = None,
     statistics: GameStatistics | None = None,
+    profile_manager: ProfileManager | None = None,
+    username: str | None = None,
 ) -> str | None:
     settings = settings if settings is not None else MenuSettings()
     statistics = statistics if statistics is not None else GameStatistics()
@@ -545,7 +837,7 @@ def show_menu(
 
     while True:
         if page == "main":
-            buttons = draw_menu(screen)
+            buttons = draw_menu(screen, username=username)
         elif page == "settings":
             buttons = _draw_settings_page(screen, settings)
         elif page == "stats":
@@ -561,6 +853,51 @@ def show_menu(
                     f"Losses (Black): {statistics.loss_percentage:.1f}%",
                 ],
             )
+        elif page == "history":
+            history_lines = [
+                f"{entry['date'].replace('T', ' ')} | {entry['mode']} | {entry['result']}"
+                for entry in reversed(statistics.history[-5:])
+            ]
+            buttons = _draw_page(
+                screen,
+                "Recent Match History",
+                history_lines or ["No completed games yet."],
+            )
+        elif page == "leaderboard":
+            ranked_profiles = (
+                profile_manager.leaderboard() if profile_manager is not None else []
+            )
+            leaderboard_lines = [
+                f"{index}. {player} - {profile.get('stats', {}).get('estimated_elo', 1200):.0f} Elo "
+                f"({profile.get('stats', {}).get('games_played', 0)} games)"
+                for index, (player, profile) in enumerate(ranked_profiles[:5], start=1)
+            ]
+            buttons = _draw_page(
+                screen,
+                "Local Player Leaderboard",
+                leaderboard_lines or ["Create another player profile to compete."],
+            )
+        elif page == "account":
+            buttons = _draw_action_page(
+                screen,
+                "Player Account",
+                f"Signed in as {username or 'player'}.",
+                (
+                    ("switch", "Switch Player", (73, 99, 132)),
+                    ("delete", "Delete This Profile", (145, 75, 65)),
+                    ("back", "Back to Menu", (55, 135, 75)),
+                ),
+            )
+        elif page == "confirm_delete":
+            buttons = _draw_action_page(
+                screen,
+                "Delete Player Profile?",
+                "This permanently removes the account, settings, and stats.",
+                (
+                    ("confirm", "Delete Profile", (145, 75, 65)),
+                    ("cancel", "Keep Profile", (55, 135, 75)),
+                ),
+            )
         elif page == "help":
             buttons = _draw_help_slide(screen, help_slide_index)
         pygame.display.flip()
@@ -568,6 +905,13 @@ def show_menu(
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return None
+            if event.type == pygame.VIDEORESIZE:
+                size = (
+                    max(MIN_WINDOW_SIZE[0], event.w),
+                    max(MIN_WINDOW_SIZE[1], event.h),
+                )
+                screen = pygame.display.set_mode(size, pygame.RESIZABLE)
+                break
             if event.type == pygame.KEYDOWN:
                 if page == "help":
                     if event.key in (pygame.K_RIGHT, pygame.K_SPACE):
@@ -579,6 +923,8 @@ def show_menu(
                         help_slide_index = max(0, help_slide_index - 1)
                     elif event.key == pygame.K_ESCAPE:
                         page = "main"
+                elif event.key == pygame.K_ESCAPE:
+                    page = "main"
                 continue
             if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
                 continue
@@ -591,9 +937,15 @@ def show_menu(
                     page = "settings"
                 elif buttons["stats"].collidepoint(event.pos):
                     page = "stats"
+                elif buttons["history"].collidepoint(event.pos):
+                    page = "history"
+                elif buttons["leaderboard"].collidepoint(event.pos):
+                    page = "leaderboard"
                 elif buttons["help"].collidepoint(event.pos):
                     page = "help"
                     help_slide_index = 0
+                elif buttons["account"].collidepoint(event.pos):
+                    page = "account"
                 elif buttons["quit"].collidepoint(event.pos):
                     return None
             elif page == "settings":
@@ -621,6 +973,18 @@ def show_menu(
                         ]
                 elif buttons["back"].collidepoint(event.pos):
                     page = "main"
+            elif page == "account":
+                if buttons["switch"].collidepoint(event.pos):
+                    return SWITCH_PLAYER
+                if buttons["delete"].collidepoint(event.pos):
+                    page = "confirm_delete"
+                elif buttons["back"].collidepoint(event.pos):
+                    page = "main"
+            elif page == "confirm_delete":
+                if buttons["confirm"].collidepoint(event.pos):
+                    return DELETE_PROFILE
+                if buttons["cancel"].collidepoint(event.pos):
+                    page = "account"
             elif page == "help":
                 if buttons["previous"].collidepoint(event.pos):
                     help_slide_index = max(0, help_slide_index - 1)

@@ -1,7 +1,8 @@
-from pathlib import Path
 import warnings
 
 import pygame
+
+from src.settings import get_resource_path
 
 
 class SoundManager:
@@ -19,7 +20,7 @@ class SoundManager:
                 )
                 return
 
-        sound_dir = Path(__file__).resolve().parents[2] / "assets" / "sound"
+        sound_dir = get_resource_path("assets", "sound")
         self.sounds = {
             name: pygame.mixer.Sound(str(sound_dir / f"{name}.wav"))
             for name in (
