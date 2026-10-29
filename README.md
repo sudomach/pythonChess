@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Python Chess
 
 A desktop chess game built with Python, Pygame, and `python-chess`. Play locally
@@ -79,3 +80,7 @@ Stockfish from its [official download page](https://stockfishchess.org/download/
   included `License.txt` identifies them as CC0.
 - Sound effects are in `assets\sound\`.
 - The Stockfish engine is a separate executable bundled with Windows builds.
+=======
+# pythonChess
+Python powered chess game!
+>>>>>>> branch1
